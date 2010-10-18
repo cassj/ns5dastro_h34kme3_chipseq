@@ -27,10 +27,15 @@ set :group_name, 'ns5dastro_h3k4me3_chipseq'
 
 set :snap_id, `cat SNAPID`.chomp #ec2 eu-west-1 
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
-set :ebs_size, 20  #Needs to be the size of the snap plus enough space for alignments
+set :ebs_size, 30  #Needs to be the size of the snap plus enough space for alignments
 set :ebs_zone, 'eu-west-1b'  #is where the ubuntu ami is
 set :dev, '/dev/sdf'
 set :mount_point, '/mnt/data'
+
+
+set :ip, "#{mount_point}/CMN027_181_unique_hits.txt"
+set :input, "#{mount_point}/CMN028_028_unique_hits.txt"
+
 
 #grab the snapshot ID for the raw data (fastq)
 task :get_snap_id, :roles=>:master do
@@ -48,14 +53,62 @@ end
 
 
 # There's little point in realigning this data - anything ELAND couldn't align
-# has been thrown away already. So
+# has been thrown away already. So...
+
+desc "remove the .fa extension from chr names in unique_hits files"
+task :strip_fa, :roles => group_name do
+  run "perl -pi -e 's/(chr.+)\.fa/$1/g' #{ip}\n"
+  run "perl -pi -e 's/(chr.+)\.fa/$1/g' #{input}\n"
+
+end
+before "strip_fa", "EC2:start"
+
+
+desc "install liftOver"
+task :install_liftover, :roles => group_name do
+
+  #liftover
+  sudo 'wget -O /usr/bin/liftOver http://hgdownload.cse.ucsc.edu/admin/exe/linux.i386/liftOver'
+  sudo 'chmod +x /usr/bin/liftOver'
+
+  #chainfile - note that the script sortedmm8tomm9 expects the chain files to be in ../lib
+  run "mkdir -p #{working_dir}/lib"
+  run "wget  -O #{working_dir}/lib/mm8ToMm9.over.chain.gz 'http://hgdownload.cse.ucsc.edu/goldenPath/mm8/liftOver/mm8ToMm9.over.chain.gz'"
+
+  run  "mkdir -p #{working_dir}/scripts"
+  run "gunzip -c #{working_dir}/lib/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain"
+  run "wget -O #{working_dir}/scripts/sortedmm8tomm9.R  '#{git_url}/sortedmm8tomm9.R'"
+  run "chmod +x #{working_dir}/sripts/sortedmm8tomm9.R"
+
+end 
+before "install_liftover", "EC2:start"
+
+
+#desc "liftOver ELAND mm8 positions to mm9"
+#task :liftOver, :roles => group_name do
+#
+#  infiles = ['IP.txt', 'Input.txt']
+#  hosts = instances.dns_name
+#  (2..hosts.length).each { |i|
+#    run ("cd #{working_dir} && #{script_dir}/sortedmm8tomm9.R #{infiles[l-1]}" ,{:hosts => hosts[i-1] })
+#  } 
+#  
+#end
+#before "liftOver", "EC2:start"
+
+
+desc "Remove anything mapping to a random chr"
+task :remove_random, :roles => group_name do
+  run "cd #{working_dir} && perl -ni.bak -e 'print $_ unless /.*random.*/;' *_mm9.txt"
+end
+before "remove_random", "EC2:start"
 
 
 
 
 # fetch samtools from svn
 desc "get samtools"
-task :get_samtools, :roles => :chipseq do
+task :get_samtools, :roles => group_name do
   sudo "apt-get -y install subversion"
   run "svn co https://samtools.svn.sourceforge.net/svnroot/samtools/trunk/samtools"
 end
@@ -63,7 +116,7 @@ before "get_samtools", "EC2:start"
 
 
 desc "build samtools"
-task :build_samtools, :roles => :chipseq do
+task :build_samtools, :roles => group_name do
   sudo "apt-get -y install zlib1g-dev libncurses5-dev"
   run "cd /home/ubuntu/samtools && make"
 end
@@ -71,16 +124,35 @@ before "build_samtools", "EC2:start"
 
 
 desc "install samtools"
-task :install_samtools, :roles => :chipseq do
+task :install_samtools, :roles => group_name do
   sudo "cp /home/ubuntu/samtools/samtools /usr/local/bin/samtools"
 end
 before "install_samtools", "EC2:start"
 
 
+
+desc "make sam files from unique.txt"
+task :make_sam, :roles => group_name do
+  run "cd #{working_dir} && curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sorted2sam.pl > sorted2sam.pl"
+  run "sudo mv #{working_dir}/sorted2sam.pl /usr/local/bin"
+  run "sudo chmod +x /usr/local/bin/sorted2sam.pl"
+  ip_o = ip.sub('.txt','.sam')
+  input_o = input.sub('.txt','.sam')
+  run "sorted2sam.pl #{ip} > #{ip_o}"
+  run "sorted2sam.pl #{input} > #{input_o}"
+end
+before 'make_sam', 'EC2:start'
+
+
 desc "make bam from sam"
-task :to_bam, :roles => :chipseq do
-  run "wget -O #{working_dir}/mm9_lengths  'http://github.com/cassj/my_bioinfo_scripts/raw/master/genomes/mm9_lengths'"
-  run "samtools view -bt #{working_dir}/mm9_lengths -o #{working_dir}/export.bam #{working_dir}/export.sam"
+task :to_bam, :roles => group_name do
+  run "cd #{working_dir} && curl http://github.com/cassj/my_bioinfo_scripts/raw/master/genomes/mm9_lengths > mm9_lengths"
+  ip_i = ip.sub('.txt','.sam')
+  input_i = input.sub('.txt','.sam')
+  ip_o = ip.sub('.txt','.bam')
+  input_o = input.sub('.txt','.bam')
+  run "samtools view -bt #{working_dir}/mm9_lengths -o #{ip_o}  #{ip_i}"
+  run "samtools view -bt #{working_dir}/mm9_lengths -o #{input_o} #{input_i}"
 end
 before "to_bam", "EC2:start"
 
