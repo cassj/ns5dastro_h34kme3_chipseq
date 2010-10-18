@@ -64,6 +64,21 @@ end
 before "strip_fa", "EC2:start"
 
 
+
+desc "install R on all running instances in group group_name"
+task :install_r, :roles  => group_name do
+  sudo "mkdir -p #{working_dir}/scripts"
+  user = variables[:ssh_options][:user]
+  sudo "chown #{user} #{working_dir}/scripts"
+  sudo 'apt-get -y install r-base'
+  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
+  run "wget 'http://github.com/cassj/manu_rest_project/raw/master/R_setup.R' -O #{working_dir}/scripts/R_setup.R"
+  sudo "Rscript #{working_dir}/scripts/R_setup.R"
+end
+before "install_r", "EC2:start"
+  
+
+
 desc "install liftOver"
 task :install_liftover, :roles => group_name do
 
@@ -75,7 +90,6 @@ task :install_liftover, :roles => group_name do
   run "mkdir -p #{working_dir}/lib"
   run "wget  -O #{working_dir}/lib/mm8ToMm9.over.chain.gz 'http://hgdownload.cse.ucsc.edu/goldenPath/mm8/liftOver/mm8ToMm9.over.chain.gz'"
 
-  run  "mkdir -p #{working_dir}/scripts"
   run "gunzip -c #{working_dir}/lib/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain"
   run "wget -O #{working_dir}/scripts/sortedmm8tomm9.R  '#{git_url}/sortedmm8tomm9.R'"
   run "chmod +x #{working_dir}/sripts/sortedmm8tomm9.R"
