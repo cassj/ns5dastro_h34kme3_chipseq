@@ -109,11 +109,12 @@ task :liftOver, :roles => group_name do
   files = capture "ls #{mount_point}"
   files = files.split("\n").select{|f| f.match(/unique_hits\.txt/)}
   files.each{|f|     
-    run "cd #{working_dir} && #{working_dir}/scripts/sortedmm8tomm9.R #{f}" 
+    run "cd #{mount_point} && #{working_dir}/scripts/sortedmm8tomm9.R #{f}" 
   }
 end
 before "liftOver", "EC2:start"
 
+#I am here
 
 desc "Remove anything mapping to a random chr"
 task :remove_random, :roles => group_name do

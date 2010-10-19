@@ -1,14 +1,12 @@
 #!/usr/bin/Rscript
 
-
 args <- commandArgs(trailingOnly=TRUE)
 filename = args[1]
-
+chain.file = args[2]
 
 qw <- function(...) {
   as.character(sys.call()[-1])
 }
-
 
 liftOver<-function(data, chain.file, ucsc.format=T, chr.col="chr", start.col="start",end.col="end"){
 
@@ -96,7 +94,7 @@ liftOver.sorted <- function(data){
                      "end"   = as.numeric(data[,"match.pos"])
                      )
 
-  mapped.mm9 <- liftOver(to.map, chain.file="lib/mm8ToMm9.over.chain")
+  mapped.mm9 <- liftOver(to.map, chain.file=chain.file)
   
   #and stick the results back in the dataframe
   data[,"match.chr"] <- as.character(mapped.mm9[,"chr"])
