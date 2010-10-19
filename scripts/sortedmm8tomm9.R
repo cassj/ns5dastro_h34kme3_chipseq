@@ -1,3 +1,9 @@
+#!/usr/bin/Rscript
+
+
+args <- commandArgs(trailingOnly=TRUE)
+filename = args[1]
+
 
 qw <- function(...) {
   as.character(sys.call()[-1])
@@ -78,13 +84,6 @@ liftOver<-function(data, chain.file, ucsc.format=T, chr.col="chr", start.col="st
   return(data)
   
 }
-
-
-
-#call like R --vanilla --args filename=\"thing\"
-args<-commandArgs()
-eval(parse(text=args[grep('filename', args)]))
-
 
 #function to do the liftover
 liftOver.sorted <- function(data){

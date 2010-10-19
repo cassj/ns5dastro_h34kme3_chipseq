@@ -72,7 +72,7 @@ task :install_r, :roles  => group_name do
   sudo "chown #{user} #{working_dir}/scripts"
   sudo 'apt-get -y install r-base'
   sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
-  run "wget 'http://github.com/cassj/manu_rest_project/raw/master/R_setup.R' -O #{working_dir}/scripts/R_setup.R"
+  run "curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/R_setup.R > #{working_dir}/scripts/R_setup.R"
   sudo "Rscript #{working_dir}/scripts/R_setup.R"
 end
 before "install_r", "EC2:start"
@@ -86,29 +86,33 @@ task :install_liftover, :roles => group_name do
   sudo 'wget -O /usr/bin/liftOver http://hgdownload.cse.ucsc.edu/admin/exe/linux.i386/liftOver'
   sudo 'chmod +x /usr/bin/liftOver'
 
-  #chainfile - note that the script sortedmm8tomm9 expects the chain files to be in ../lib
-  run "mkdir -p #{working_dir}/lib"
-  run "wget  -O #{working_dir}/lib/mm8ToMm9.over.chain.gz 'http://hgdownload.cse.ucsc.edu/goldenPath/mm8/liftOver/mm8ToMm9.over.chain.gz'"
-
-  run "gunzip -c #{working_dir}/lib/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain"
-  run "wget -O #{working_dir}/scripts/sortedmm8tomm9.R  '#{git_url}/sortedmm8tomm9.R'"
-  run "chmod +x #{working_dir}/sripts/sortedmm8tomm9.R"
-
 end 
 before "install_liftover", "EC2:start"
 
+desc "get mm8tomm9 chainfile"
+task :mm8_chain_mm9, :roles => group_name do
+  #chainfile - note that the script sortedmm8tomm9 expects the chain files to be in ../lib
+  run "mkdir -p #{working_dir}/lib"
+  run "curl http://hgdownload.cse.ucsc.edu/goldenPath/mm8/liftOver/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain.gz"
+  run "gunzip -c #{working_dir}/lib/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain"
+end 
+before "mm8_chain_mm9", "EC2:start"
 
-#desc "liftOver ELAND mm8 positions to mm9"
-#task :liftOver, :roles => group_name do
-#
-#  infiles = ['IP.txt', 'Input.txt']
-#  hosts = instances.dns_name
-#  (2..hosts.length).each { |i|
-#    run ("cd #{working_dir} && #{script_dir}/sortedmm8tomm9.R #{infiles[l-1]}" ,{:hosts => hosts[i-1] })
-#  } 
-#  
-#end
-#before "liftOver", "EC2:start"
+
+
+desc "liftOver ELAND mm8 positions to mm9"
+task :liftOver, :roles => group_name do
+
+  run "curl  http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sortedmm8tomm9.R > #{working_dir}/scripts/sortedmm8tomm9.R"
+  run "chmod +x #{working_dir}/scripts/sortedmm8tomm9.R"
+ 
+  files = capture "ls #{mount_point}"
+  files = files.split("\n").select{|f| f.match(/unique_hits\.txt/)}
+  files.each{|f|     
+    run "cd #{working_dir} && #{working_dir}/scripts/sortedmm8tomm9.R #{f}" 
+  }
+end
+before "liftOver", "EC2:start"
 
 
 desc "Remove anything mapping to a random chr"
