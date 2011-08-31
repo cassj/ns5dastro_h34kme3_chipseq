@@ -1,0 +1,7 @@
+Order allow,deny
+Allow from all
+AuthName "Mash1 Project"
+AuthType Basic
+AuthUserFile /etc/htpasswd/.htpasswd
+require user buckleylab
+Options Indexes

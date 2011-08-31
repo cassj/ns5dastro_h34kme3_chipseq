@@ -2,11 +2,11 @@
 	 	
 source("http://www.bioconductor.org/biocLite.R")
 	 	
-biocLite("limma")
+#biocLite("limma")
 	 	
-biocLite("affy")
+#biocLite("affy")
 	 	
-biocLite("beadarray")
+#biocLite("beadarray")
 	 	
 biocLite("IRanges")
 	 	
@@ -14,5 +14,5 @@ biocLite("biomaRt")
 	 	
 biocLite("ChIPpeakAnno")
 
-biocLite("BSgenome.Mmusculus.UCSC.mm9")
+#biocLite("BSgenome.Mmusculus.UCSC.mm9")
 

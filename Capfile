@@ -12,10 +12,11 @@ set :ec2_url, ENV['EC2_URL']
 set :ssh_options, { :user => "ubuntu", :keys=>[ENV['EC2_KEYFILE']]}
 set :key, ENV['EC2_KEY']
 set :key_file, ENV['EC2_KEYFILE']
-set :ami, 'ami-20794c54'  #EC2 eu-west-1 64bit Lucid
+set :ami, `curl http://mng.iop.kcl.ac.uk/cass_data/buckley_ami/AMIID`.chomp
 set :instance_type, 'm1.large'
 set :s3cfg, ENV['S3CFG'] #location of ubuntu s3cfg file
 set :working_dir, '/mnt/work'
+set :availability_zone, 'eu-west-1a'
 
 #note to self
 #ami-52794c26 32bit Lucid
@@ -30,17 +31,26 @@ set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
 set :ebs_size, 50  #Needs to be the size of the snap plus enough space for alignments
 set :ebs_zone, 'eu-west-1b'  #is where the ubuntu ami is
 set :dev, '/dev/sdh'
-set :mount_point, '/mnt/data2'
+set :mount_point, '/mnt/data'
 
 
-set :ip, "#{mount_point}/CMN027_181_unique_hits.txt"
-set :input, "#{mount_point}/CMN028_028_unique_hits.txt"
+#Data uploading.
+set :input_data, 'data/CMN028_028_unique_hits.txt'
+set :ip_data, 'data/CMN027_181_unique_hits.txt'
+
+desc "Upload each dataset one to the new EBS volume"
+task :upload_data, :roles => proc{fetch :group_name} do
+  upload("#{input_data}", "#{mount_point}/input.export.txt")
+  upload("#{ip_data}", "#{mount_point}/ip.export.txt")
+end
+before 'upload_data', 'EC2:start'
 
 
-#grab the snapshot ID for the raw data (fastq)
-task :get_snap_id, :roles=>:master do
-  `curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/data/SNAPID > SNAPID `
-end 
+set :ip, "#{mount_point}/ip.export.txt"
+set :input, "#{mount_point}/input.export.txt"
+
+
+
 
 
 #make a new EBS volume from this snap 
@@ -64,17 +74,17 @@ end
 before "strip_fa", "EC2:start"
 
 
-desc "install R on all running instances in group group_name"
-task :install_r, :roles  => group_name do
-  sudo "mkdir -p #{working_dir}/scripts"
-  user = variables[:ssh_options][:user]
-  sudo "chown #{user} #{working_dir}/scripts"
-  sudo 'apt-get -y install r-base'
-  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
-  run "curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/R_setup.R > #{working_dir}/scripts/R_setup.R"
-  sudo "Rscript #{working_dir}/scripts/R_setup.R"
-end
-before "install_r", "EC2:start"
+#desc "install R on all running instances in group group_name"
+#task :install_r, :roles  => group_name do
+#  sudo "mkdir -p #{working_dir}/scripts"
+#  user = variables[:ssh_options][:user]
+#  sudo "chown #{user} #{working_dir}/scripts"
+#  sudo 'apt-get -y install r-base'
+#  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
+#  run "curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/R_setup.R > #{working_dir}/scripts/R_setup.R"
+#  sudo "Rscript #{working_dir}/scripts/R_setup.R"
+#end
+#before "install_r", "EC2:start"
   
 
 
@@ -102,14 +112,15 @@ before "mm8_chain_mm9", "EC2:start"
 
 desc "liftOver ELAND mm8 positions to mm9"
 task :liftOver, :roles => group_name do
-
-  run "curl  http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sortedmm8tomm9.R > #{working_dir}/scripts/sortedmm8tomm9.R"
+  sudo "mkdir -p #{working_dir}/scripts"
+  sudo "chown ubuntu:ubuntu #{working_dir}/scripts"
+  run "curl  -L http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sortedmm8tomm9.R > #{working_dir}/scripts/sortedmm8tomm9.R"
   run "chmod +x #{working_dir}/scripts/sortedmm8tomm9.R"
  
   files = capture "ls #{mount_point}"
-  files = files.split("\n").select{|f| f.match(/unique_hits\.txt/)}
+  files = files.split("\n").select{|f| f.match(/export\.txt/)}
   files.each{|f|     
-    run "cd #{mount_point} && #{working_dir}/scripts/sortedmm8tomm9.R #{f} #{working_dir}/lib/mm8ToMm9.over.chain" 
+    run "cd #{mount_point} && Rscript #{working_dir}/scripts/sortedmm8tomm9.R #{f} #{working_dir}/lib/mm8ToMm9.over.chain" 
   }
 end
 before "liftOver", "EC2:start"
@@ -118,7 +129,7 @@ before "liftOver", "EC2:start"
 desc "Remove anything mapping to a random chr"
 task :remove_random, :roles => group_name do
   files = capture "ls #{mount_point}"
-  files = files.split("\n").select{|f| f.match(/unique_hits_mm9\.txt/)}
+  files = files.split("\n").select{|f| f.match(/export_mm9\.txt/)}
   files.each{|f|     
     run "cd #{mount_point} && perl -ni.bak -e 'print $_ unless /.*random.*/;' #{f}" 
   }
@@ -128,33 +139,33 @@ before "remove_random", "EC2:start"
 
 
 
-# fetch samtools from svn
-desc "get samtools"
-task :get_samtools, :roles => group_name do
-  sudo "apt-get -y install subversion"
-  run "svn co https://samtools.svn.sourceforge.net/svnroot/samtools/trunk/samtools"
-end
-before "get_samtools", "EC2:start"
-
-
-desc "build samtools"
-task :build_samtools, :roles => group_name do
-  sudo "apt-get -y install zlib1g-dev libncurses5-dev"
-  run "cd /home/ubuntu/samtools && make"
-end
-before "build_samtools", "EC2:start"
-
-
-desc "install samtools"
-task :install_samtools, :roles => group_name do
-  sudo "cp /home/ubuntu/samtools/samtools /usr/local/bin/samtools"
-end
-before "install_samtools", "EC2:start"
-
+## fetch samtools from svn
+#desc "get samtools"
+#task :get_samtools, :roles => group_name do
+#  sudo "apt-get -y install subversion"
+#  run "svn co https://samtools.svn.sourceforge.net/svnroot/samtools/trunk/samtools"
+#end
+#before "get_samtools", "EC2:start"
+#
+#
+#desc "build samtools"
+#task :build_samtools, :roles => group_name do
+#  sudo "apt-get -y install zlib1g-dev libncurses5-dev"
+#  run "cd /home/ubuntu/samtools && make"
+#end
+#before "build_samtools", "EC2:start"
+#
+#
+#desc "install samtools"
+#task :install_samtools, :roles => group_name do
+#  sudo "cp /home/ubuntu/samtools/samtools /usr/local/bin/samtools"
+#end
+#before "install_samtools", "EC2:start"
+#
 
 desc "make sam files from unique.txt"
 task :make_sam, :roles => group_name do
-  run "cd #{working_dir}/scripts && curl http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sorted2sam.pl > sorted2sam.pl"
+  run "cd #{working_dir}/scripts && curl -L http://github.com/cassj/ns5dastro_h34kme3_chipseq/raw/master/scripts/sorted2sam.pl > sorted2sam.pl"
   run "sudo mv #{working_dir}/scripts/sorted2sam.pl /usr/local/bin"
   run "sudo chmod +x /usr/local/bin/sorted2sam.pl"
   ip_i = ip.sub('.txt','_mm9.txt')
@@ -249,33 +260,32 @@ before "get_bam", 'EC2:start'
 
 ### Macs ?
 
-macs_url ="http://liulab.dfci.harvard.edu/MACS/src/MACS-1.4.0beta.tar.gz"
-macs_version = "MACS-1.4.0beta"
-
-task :install_macs, :roles => group_name do
-  sudo "apt-get install -y python"
-  run "cd #{working_dir} && wget --http-user macs --http-passwd chipseq #{macs_url}"
-  run "cd #{working_dir} && tar -xvzf #{macs_version}.tar.gz"
-  run "cd #{working_dir}/#{macs_version} && sudo python setup.py install"
-  sudo "ln -s /usr/local/bin/macs* /usr/local/bin/macs"
-end
-before "install_macs", 'EC2:start'
-
-task :install_peaksplitter, :roles => group_name do
-  url ='http://www.ebi.ac.uk/bertone/software/PeakSplitter_Cpp_1.0.tar.gz'
-  filename = 'PeakSplitter_Cpp_1.0.tar.gz'
-  bin = 'PeakSplitter_Cpp/PeakSplitter_Linux64/PeakSplitter'
-  run "cd #{working_dir} && curl #{url} > #{filename}"
-  run "cd #{working_dir} && tar -xvzf #{filename}"
-  run "sudo cp #{working_dir}/#{bin} /usr/local/bin/PeakSplitter"
-end 
-before 'install_peaksplitter', 'EC2:start'
-
+#macs_url ="http://liulab.dfci.harvard.edu/MACS/src/MACS-1.4.0beta.tar.gz"
+#macs_version = "MACS-1.4.0beta"
+#
+#task :install_macs, :roles => group_name do
+#  sudo "apt-get install -y python"
+#  run "cd #{working_dir} && wget --http-user macs --http-passwd chipseq #{macs_url}"
+#  run "cd #{working_dir} && tar -xvzf #{macs_version}.tar.gz"
+#  run "cd #{working_dir}/#{macs_version} && sudo python setup.py install"
+#  sudo "ln -s /usr/local/bin/macs* /usr/local/bin/macs"
+#end
+#before "install_macs", 'EC2:start'
+#
+#task :install_peaksplitter, :roles => group_name do
+#  url ='http://www.ebi.ac.uk/bertone/software/PeakSplitter_Cpp_1.0.tar.gz'
+#  filename = 'PeakSplitter_Cpp_1.0.tar.gz'
+#  bin = 'PeakSplitter_Cpp/PeakSplitter_Linux64/PeakSplitter'
+#  run "cd #{working_dir} && curl #{url} > #{filename}"
+#  run "cd #{working_dir} && tar -xvzf #{filename}"
+#  run "sudo cp #{working_dir}/#{bin} /usr/local/bin/PeakSplitter"
+#end 
+#before 'install_peaksplitter', 'EC2:start'
+#
 #you'll need to have done "install_r" and install_peak_splitter to do this
 task :run_macs, :roles => group_name do
-
-  treatment = "#{mount_point}/CMN027_181_unique_hits_mm9_sorted_nodups.bam"
-  control = "#{mount_point}/CMN028_028_unique_hits_mm9_sorted_nodups.bam"
+  treatment = "#{mount_point}/ip.export_mm9_sorted_nodups.bam"
+  control = "#{mount_point}/input.export_mm9_sorted_nodups.bam"
   genome = 'mm'
   bws = [300]
   pvalues = [0.00001]
